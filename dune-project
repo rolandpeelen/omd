@@ -1,8 +1,10 @@
-(lang dune 2.7)
+(lang dune 3.8)
 (name omd)
+(using melange 0.1)
 (version 2.0.0~alpha1)
 
 (cram enable)
+
 
 (generate_opam_files)
 
@@ -25,9 +27,11 @@ extension mechanism, and some other features. Note that the opam
 package installs both the OMD library and the command line tool `omd`.")
  (tags (org:ocamllabs org:mirage))
  (depends
-  (ocaml (>= 4.13))
+  (dune (>= 3.14))
+  (ocaml (>= 5.1))
+  (melange (>= 3.0.0))
    uutf
    uucp
    uunf
-  (dune-build-info (>= 2.7))
+  (dune-build-info (>= 3.14))
   (ppx_expect :with-test)))

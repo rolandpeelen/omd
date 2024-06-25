@@ -21,12 +21,13 @@ tags: ["org:ocamllabs" "org:mirage"]
 homepage: "https://github.com/ocaml/omd"
 bug-reports: "https://github.com/ocaml/omd/issues"
 depends: [
-  "dune" {>= "2.7"}
-  "ocaml" {>= "4.13"}
+  "dune" {>= "3.8" & >= "3.14"}
+  "ocaml" {>= "5.1"}
+  "melange" {>= "3.0.0"}
   "uutf"
   "uucp"
   "uunf"
-  "dune-build-info" {>= "2.7"}
+  "dune-build-info" {>= "3.14"}
   "ppx_expect" {with-test}
   "odoc" {with-doc}
 ]
