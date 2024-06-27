@@ -32,11 +32,11 @@ let htmlentities s =
     else begin
       begin
         match s.[i] with
-        | '"' -> Buffer.add_string b "&quot;"
-        | '&' -> Buffer.add_string b "&amp;"
-        | '<' -> Buffer.add_string b "&lt;"
-        | '>' -> Buffer.add_string b "&gt;"
-        | c -> Buffer.add_char b c
+        | {|"|} -> Buffer.add_string b "&quot;"
+        | "&" -> Buffer.add_string b "&amp;"
+        | "<" -> Buffer.add_string b "&lt;"
+        | ">" -> Buffer.add_string b "&gt;"
+        | s -> Buffer.add_string b s
       end;
       loop (succ i)
     end
@@ -74,14 +74,16 @@ let escape_uri s =
   let b = Buffer.create (String.length s) in
   String.iter
     (function
-      | ( '!' | '*' | '\'' | '(' | ')' | ';' | ':' | '@' | '=' | '+' | '$' | ','
-        | '/' | '?' | '%' | '#'
-        | 'A' .. 'Z'
-        | 'a' .. 'z'
-        | '0' .. '9'
-        | '-' | '_' | '.' | '~' | '&' ) as c ->
-          Buffer.add_char b c
-      | _ as c -> Printf.bprintf b "%%%2X" (Char.code c))
+      | ( "!" | "*" | "\"" | "(" | ")" | ";" | ":" | "@" | "=" | "+" | "$" | ","
+        | "/" | "?" | "%" | "#"
+        | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M"
+        | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z"
+        | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
+        | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
+        | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9"
+        | "-" | "_" | "." | "~" | "&" ) as s ->
+          Buffer.add_string b s
+      | _ as s -> Printf.bprintf b "%%%2X" (Char.code (String.to_char s)))
     s;
   Buffer.contents b
 
@@ -89,7 +91,7 @@ let trim_start_while p s =
   let start = ref true in
   let b = Buffer.create (String.length s) in
   s
-  |> String_ext.reduce
+  |> String.reduce
        (fun _ s ->
          match s with
          | u when p u && !start -> ()
@@ -116,7 +118,7 @@ module Identifiers : sig
   (** Bump the frequency count for the given string. 
       It returns the previous count (before bumping) *)
 end = struct
-  module SMap = Map.Make (String)
+  module SMap = Map.Make (Stdlib.String)
 
   type t = int SMap.t
 
@@ -151,7 +153,7 @@ let slugify s =
           u |> Js.String.toLowerCase |> add_to_buffer;
         if u = underscore || u = hyphen || u = period then add_to_buffer u
   in
-  String_ext.reduce fold () s;
+  String.reduce fold () s;
   Buffer.contents b
 
 let to_plain_text t =

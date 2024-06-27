@@ -31,12 +31,12 @@ module Pre = struct
     ; next : container
     }
 
-  let concat l = String.concat "\n" (List.rev l) ^ "\n"
+  let concat l = Stdlib.String.concat "\n" (List.rev l) ^ "\n"
 
   let trim_left s =
     let rec loop i =
       if i >= String.length s then i
-      else match s.[i] with ' ' | '\t' -> loop (succ i) | _ -> i
+      else match s.[i] with " " | "\t" -> loop (succ i) | _ -> i
     in
     let i = loop 0 in
     if i > 0 then String.sub s i (String.length s - i) else s
@@ -91,15 +91,15 @@ module Pre = struct
   let classify_delimiter s =
     let left, s =
       match StrSlice.head s with
-      | Some ':' -> (true, StrSlice.drop 1 s)
+      | Some ":" -> (true, StrSlice.drop 1 s)
       | _ -> (false, s)
     in
     let right, s =
       match StrSlice.last s with
-      | Some ':' -> (true, StrSlice.drop_last s)
+      | Some ":" -> (true, StrSlice.drop_last s)
       | _ -> (false, s)
     in
-    if StrSlice.exists (fun c -> c <> '-') s then None
+    if StrSlice.exists (fun c -> c <> "-") s then None
     else
       match (left, right) with
       | true, true -> Some Centre
@@ -330,13 +330,13 @@ module Pre = struct
       if off >= String.length s then (Buffer.contents buf, None)
       else
         match s.[off] with
-        | '\n' -> (Buffer.contents buf, Some (succ off))
-        | '\r' ->
-            if cr_read then Buffer.add_char buf '\r';
+        | "\n" -> (Buffer.contents buf, Some (succ off))
+        | "\r" ->
+            if cr_read then Buffer.add_string buf "\r";
             loop true (succ off)
         | c ->
-            if cr_read then Buffer.add_char buf '\r';
-            Buffer.add_char buf c;
+            if cr_read then Buffer.add_string buf "\r";
+            Buffer.add_string buf c;
             loop false (succ off)
     in
     loop false off

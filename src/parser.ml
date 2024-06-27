@@ -1,6 +1,5 @@
 open Ast.Impl
-
-let ( >> ) f g x = g (f x)
+open Utils
 
 type 'attr link_def =
   { label : string
@@ -10,13 +9,13 @@ type 'attr link_def =
   }
 
 let is_whitespace = function
-  | ' ' | '\t' | '\010' .. '\013' -> true
+  | " " | "\t" | "\010" | "\011" | "\012" | "\013" -> true
   | _ -> false
 
 let is_punct = function
-  | '!' | '"' | '#' | '$' | '%' | '&' | '\'' | '(' | ')' | '*' | '+' | ',' | '-'
-  | '.' | '/' | ':' | ';' | '<' | '=' | '>' | '?' | '@' | '[' | '\\' | ']' | '^'
-  | '_' | '`' | '{' | '|' | '}' | '~' ->
+  | "!" | {|"|} | "#" | "$" | "%" | "&" | {|'|} | "(" | ")" | "*" | "+" | ","
+  | "-" | "." | "/" | ":" | ";" | "<" | "=" | ">" | "?" | "@" | "[" | {|\\|}
+  | "]" | "^" | "_" | "`" | "{" | "|" | "}" | "~" ->
       true
   | _ -> false
 
@@ -31,25 +30,25 @@ module P : sig
 
   val of_string : string -> state
 
-  val peek : char option t
+  val peek : string option t
   (** [Some c] if [c] is the next character in the input, or [None]
       if the input is exhausted.
 
       NOTE: Does not advance the state. *)
 
-  val peek_exn : char t
+  val peek_exn : string t
   (** the next character in the input, or raises [Fail] if the
       input is exhausted.
 
       NOTE: Does not advance the state. *)
 
-  val peek_before : char -> state -> char
+  val peek_before : string -> state -> string
   (** the previous character in the input, or the next
       character, if we are at the start of the input.
 
       NOTE: Does not advance the state. *)
 
-  val peek_after : char -> state -> char
+  val peek_after : string -> state -> string
   (** the character after the next in the input, or the next
       character, if we are at the end of the input.
 
@@ -62,10 +61,10 @@ module P : sig
   val junk : unit t
   (** ignores the next character in the input *)
 
-  val char : char -> unit t
+  val char : string -> unit t
   (** accepts a [c] *)
 
-  val next : char t
+  val next : string t
 
   val ws : unit t
   (** accepts 0 or more white space characters *)
@@ -153,7 +152,7 @@ end = struct
   let sp st =
     let rec loop () =
       match peek_exn st with
-      | ' ' | '\t' ->
+      | " " | "\t" ->
           junk st;
           loop ()
       | _ -> ()
@@ -214,9 +213,9 @@ type t =
 (* drop up to 3 spaces, returning the number of spaces dropped and the remainder of the string *)
 let sp3 s =
   match StrSlice.take 3 s with
-  | [ ' '; ' '; ' ' ] -> (3, StrSlice.drop 3 s)
-  | ' ' :: ' ' :: _ -> (2, StrSlice.drop 2 s)
-  | ' ' :: _ -> (1, StrSlice.drop 1 s)
+  | [ " "; " "; " " ] -> (3, StrSlice.drop 3 s)
+  | " " :: " " :: _ -> (2, StrSlice.drop 2 s)
+  | " " :: _ -> (1, StrSlice.drop 1 s)
   | _ -> (0, s)
 
 (** TODO Why is this here? Doesn't it almost exactly repeat the one in [P], only with slices?
@@ -232,7 +231,7 @@ let is_empty s = StrSlice.is_empty (trim_leading_ws s)
 let thematic_break =
   (* Accepts thematic break chars or fail, counting how many chars we find *)
   let f symb c count =
-    if Char.equal symb c then succ count
+    if String.equal symb c then succ count
     else if is_whitespace c then
       (* Thematic break chars can be separated by spaces *)
       count
@@ -240,7 +239,7 @@ let thematic_break =
   in
   fun s ->
     match StrSlice.head s with
-    | Some (('*' | '_' | '-') as symb) ->
+    | Some (("*" | "_" | "-") as symb) ->
         if StrSlice.fold_left (f symb) 0 s >= 3 then
           (* Three or more of the same thematic break chars found *)
           Lthematic_break
@@ -252,15 +251,15 @@ let setext_heading s =
   (* The first char determines if possible setext and the level of the heading *)
   let level, symb =
     match StrSlice.head s with
-    | Some '=' -> (1, '=')
-    | Some '-' -> (2, '-')
+    | Some "=" -> (1, "=")
+    | Some "-" -> (2, "-")
     | _ -> raise Fail
   in
   let heading_chars, rest =
-    StrSlice.split_at (fun c -> not (Char.equal c symb)) s
+    StrSlice.split_at (fun c -> not (String.equal c symb)) s
   in
   let len = StrSlice.length heading_chars in
-  if Char.equal symb '-' && len = 1 then
+  if String.equal symb "-" && len = 1 then
     (* can be interpreted as an empty list item *)
     raise Fail
   else if not (StrSlice.for_all is_whitespace rest) then
@@ -272,26 +271,29 @@ let setext_heading s =
 
    See https://pandoc.org/MANUAL.html#extension-header_attributes *)
 let parse_attributes s =
-  let attributes = String.split_on_char ' ' s in
+  let attributes = String.split " " s in
   let f (id, classes, acc) s =
     if s = "" then (id, classes, acc)
     else
       match s.[0] with
-      | '#' -> (Some (String.sub s 1 (String.length s - 1)), classes, acc)
-      | '.' -> (id, String.sub s 1 (String.length s - 1) :: classes, acc)
+      | "#" -> (Some (String.sub s 1 (String.length s - 1)), classes, acc)
+      | "." -> (id, String.sub s 1 (String.length s - 1) :: classes, acc)
       | _ -> (
-          let attr = String.split_on_char '=' s in
+          let attr = String.split "=" s in
           match attr with
-          | [] -> (id, classes, acc)
-          | h :: t -> (id, classes, (h, String.concat "=" t) :: acc))
+          | [||] -> (id, classes, acc)
+          | str ->
+              let h = Array.head str in
+              let t = str |> Array.tail |> Array.join "" in
+              (id, classes, (h, "=" ^ t) :: acc))
   in
-  let id, classes, acc = List.fold_left f (None, [], []) attributes in
+  let id, classes, acc = Array.fold_left f (None, [], []) attributes in
   let acc = List.rev acc in
   let acc =
     match classes with
     | [] -> acc
     | _ :: _ ->
-        let classes = String.concat " " (List.rev classes) in
+        let classes = classes |> List.rev |> String.intersperse " " in
         ("class", classes) :: acc
   in
   match id with Some id -> ("id", id) :: acc | None -> acc
@@ -304,20 +306,20 @@ let attribute_string s =
   let rec loop s =
     match StrSlice.head s with
     | None -> (StrSlice.of_string (Buffer.contents buf), None)
-    | Some ('\\' as c) -> (
+    | Some ("\\" as c) -> (
         let s = StrSlice.tail s in
         match StrSlice.head s with
         | Some c when is_punct c ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop (StrSlice.tail s)
         | Some _ | None ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop s)
-    | Some '{' ->
+    | Some "{" ->
         let buf' = Buffer.create 64 in
         let rec loop' s =
           match StrSlice.head s with
-          | Some '}' -> (
+          | Some "}" -> (
               (* Found a closing bracket not at the end of the line *)
               let s = StrSlice.tail s in
               match StrSlice.head s with
@@ -327,26 +329,26 @@ let attribute_string s =
                   , Some (Buffer.contents buf') )
               | Some _ ->
                   (* Not at end of line, so this can't be a set of attributes *)
-                  Buffer.add_char buf '{';
+                  Buffer.add_string buf "{";
                   Buffer.add_buffer buf buf';
-                  Buffer.add_char buf '}';
+                  Buffer.add_string buf "}";
                   loop s)
           | None ->
-              Buffer.add_char buf '{';
+              Buffer.add_string buf "{";
               Buffer.add_buffer buf buf';
               (StrSlice.of_string (Buffer.contents buf), None)
-          | Some '{' ->
-              Buffer.add_char buf '{';
+          | Some "{" ->
+              Buffer.add_string buf "{";
               Buffer.add_buffer buf buf';
               Buffer.reset buf';
               loop' (StrSlice.tail s)
           | Some c ->
-              Buffer.add_char buf' c;
+              Buffer.add_string buf' c;
               loop' (StrSlice.tail s)
         in
         loop' (StrSlice.tail s)
     | Some c ->
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop (StrSlice.tail s)
   in
   let s', a = loop (trim_leading_ws s) in
@@ -357,17 +359,17 @@ let atx_heading s =
   let rec loop n s =
     if n > 6 then raise Fail;
     match StrSlice.head s with
-    | Some '#' -> loop (succ n) (StrSlice.tail s)
+    | Some "#" -> loop (succ n) (StrSlice.tail s)
     | Some w when is_whitespace w ->
         let s, a =
           match StrSlice.last s with
-          | Some '}' -> attribute_string s
+          | Some "}" -> attribute_string s
           | _ -> (s, [])
         in
         let s = trim_ws s in
         let rec loop t =
           match StrSlice.last t with
-          | Some '#' -> loop (StrSlice.drop_last t)
+          | Some "#" -> loop (StrSlice.drop_last t)
           | Some w when is_whitespace w -> trim_trailing_ws t
           | None -> trim_trailing_ws t
           | Some _ -> s
@@ -380,26 +382,28 @@ let atx_heading s =
 
 let entity s =
   match StrSlice.take 2 s with
-  | '#' :: ('x' | 'X') :: _ ->
+  | "#" :: ("x" | "X") :: _ ->
       let rec loop m n s =
         if m > 6 then raise Fail;
         match StrSlice.head s with
-        | Some ('a' .. 'f' as c) ->
+        | Some (("a" | "b" | "c" | "d" | "e" | "f") as c) ->
             loop
               (succ m)
-              ((n * 16) + Char.code c - Char.code 'a' + 10)
+              ((n * 16) + Char.code (String.to_char c) - Char.code 'a' + 10)
               (StrSlice.tail s)
-        | Some ('A' .. 'F' as c) ->
+        | Some (("A" | "B" | "C" | "D" | "E" | "F") as c) ->
             loop
               (succ m)
-              ((n * 16) + Char.code c - Char.code 'A' + 10)
+              ((n * 16) + Char.code (String.to_char c) - Char.code 'A' + 10)
               (StrSlice.tail s)
-        | Some ('0' .. '9' as c) ->
+        | Some
+            (("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as c)
+          ->
             loop
               (succ m)
-              ((n * 16) + Char.code c - Char.code '0')
+              ((n * 16) + Char.code (String.to_char c) - Char.code '0')
               (StrSlice.tail s)
-        | Some ';' ->
+        | Some ";" ->
             if m = 0 then raise Fail;
             let u =
               if n = 0 || not (Uchar.is_valid n) then Uchar.rep
@@ -409,16 +413,18 @@ let entity s =
         | Some _ | None -> raise Fail
       in
       loop 0 0 (StrSlice.drop 2 s)
-  | '#' :: _ ->
+  | "#" :: _ ->
       let rec loop m n s =
         if m > 7 then raise Fail;
         match StrSlice.head s with
-        | Some ('0' .. '9' as c) ->
+        | Some
+            (("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as c)
+          ->
             loop
               (succ m)
-              ((n * 10) + Char.code c - Char.code '0')
+              ((n * 10) + Char.code (String.to_char c) - Char.code '0')
               (StrSlice.tail s)
-        | Some ';' ->
+        | Some ";" ->
             if m = 0 then raise Fail;
             let u =
               if n = 0 || not (Uchar.is_valid n) then Uchar.rep
@@ -428,12 +434,16 @@ let entity s =
         | Some _ | None -> raise Fail
       in
       loop 0 0 (StrSlice.tail s)
-  | ('a' .. 'z' | 'A' .. 'Z') :: _ ->
+  | ("a" | "b" | "c" | "d" | "e" | "f" | "A" | "B" | "C" | "D" | "E" | "F") :: _
+    ->
       let rec loop len t =
         match StrSlice.head t with
-        | Some ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9') ->
+        | Some
+            ( "a" | "b" | "c" | "d" | "e" | "f" | "A" | "B" | "C" | "D" | "E"
+            | "F" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" )
+          ->
             loop (succ len) (StrSlice.tail t)
-        | Some ';' -> (
+        | Some ";" -> (
             let name = StrSlice.to_string (StrSlice.sub ~len s) in
             match Entities.f name with
             | [] -> raise Fail
@@ -446,51 +456,51 @@ let entity s =
 let info_string c s =
   let buf = Buffer.create 17 in
   let s, a =
-    match StrSlice.last s with Some '}' -> attribute_string s | _ -> (s, [])
+    match StrSlice.last s with Some "}" -> attribute_string s | _ -> (s, [])
   in
   let s = trim_ws s in
   let rec loop s =
     match StrSlice.head s with
     (* TODO use is_whitespace *)
-    | Some (' ' | '\t' | '\010' .. '\013') | None ->
-        if c = '`' && StrSlice.exists (function '`' -> true | _ -> false) s
+    | Some (" " | "\t" | "\010" | "\011" | "\012" | "\013") | None ->
+        if c = "`" && StrSlice.exists (function "`" -> true | _ -> false) s
         then raise Fail;
         ((Buffer.contents buf, StrSlice.to_string (trim_leading_ws s)), a)
-    | Some '`' when c = '`' -> raise Fail
-    | Some ('\\' as c) -> (
+    | Some "`" when c = "`" -> raise Fail
+    | Some ("\\" as c) -> (
         let s = StrSlice.tail s in
         match StrSlice.head s with
         | Some c when is_punct c ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop (StrSlice.tail s)
         | Some _ | None ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop s)
-    | Some ('&' as c) -> (
+    | Some ("&" as c) -> (
         let s = StrSlice.tail s in
         match entity s with
         | ul, s ->
             List.iter (fun s -> s |> Uchar.to_char |> Buffer.add_char buf) ul;
             loop s
         | exception Fail ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop s)
     | Some c ->
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop (StrSlice.tail s)
   in
   loop (trim_leading_ws s)
 
 let fenced_code ind s =
   match StrSlice.head s with
-  | Some (('`' | '~') as c) ->
+  | Some (({|`|} | {|~|}) as c) ->
       let rec loop n s =
         match StrSlice.head s with
         | Some c1 when c = c1 -> loop (succ n) (StrSlice.tail s)
         | Some _ | None ->
             if n < 3 then raise Fail;
             let s, a = info_string c s in
-            let c = if c = '`' then Backtick else Tilde in
+            let c = if c = {|`|} then Backtick else Tilde in
             Lfenced_code (ind, n, c, s, a)
       in
       loop 1 (StrSlice.tail s)
@@ -499,15 +509,15 @@ let fenced_code ind s =
 let indent s =
   let rec loop n s =
     match StrSlice.head s with
-    | Some ' ' -> loop (n + 1) (StrSlice.tail s)
-    | Some '\t' -> loop (n + 4) (StrSlice.tail s)
+    | Some " " -> loop (n + 1) (StrSlice.tail s)
+    | Some "\t" -> loop (n + 4) (StrSlice.tail s)
     | Some _ | None -> n
   in
   loop 0 s
 
 let unordered_list_item ind s =
   match StrSlice.head s with
-  | Some (('+' | '-' | '*') as c) ->
+  | Some (("+" | "-" | "*") as c) ->
       let s = StrSlice.tail s in
       if is_empty s then Llist_item (Bullet c, 2 + ind, s)
       else
@@ -520,10 +530,13 @@ let unordered_list_item ind s =
 let ordered_list_item ind s =
   let rec loop n m s =
     match StrSlice.head s with
-    | Some ('0' .. '9' as c) ->
+    | Some (("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as c) ->
         if n >= 9 then raise Fail;
-        loop (succ n) ((m * 10) + Char.code c - Char.code '0') (StrSlice.tail s)
-    | Some (('.' | ')') as c) ->
+        loop
+          (succ n)
+          ((m * 10) + Char.code (String.to_char c) - Char.code '0')
+          (StrSlice.tail s)
+    | Some (("." | ")") as c) ->
         let s = StrSlice.tail s in
         if is_empty s then Llist_item (Ordered (m, c), n + 1 + ind, s)
         else
@@ -537,10 +550,21 @@ let ordered_list_item ind s =
 
 let tag_name s0 =
   match StrSlice.head s0 with
-  | Some ('a' .. 'z' | 'A' .. 'Z') ->
+  | Some
+      ( "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l"
+      | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x"
+      | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J"
+      | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V"
+      | "W" | "X" | "Y" | "Z" ) ->
       let rec loop len s =
         match StrSlice.head s with
-        | Some ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-') ->
+        | Some
+            ( "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k"
+            | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v"
+            | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G"
+            | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R"
+            | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2"
+            | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "-" ) ->
             loop (succ len) (StrSlice.tail s)
         | Some _ | None -> (StrSlice.to_string (StrSlice.sub s0 ~len), s)
       in
@@ -615,17 +639,17 @@ let known_tags =
 let special_tags = [ "pre"; "script"; "style"; "textarea" ]
 
 let known_tag s =
-  let s = String.lowercase_ascii s in
+  let s = String.toLowerCase s in
   List.mem s known_tags
 
 let special_tag s =
-  let s = String.lowercase_ascii s in
+  let s = String.toLowerCase s in
   List.mem s special_tags
 
 let closing_tag s =
   let s = trim_leading_ws s in
   match StrSlice.head s with
-  | Some '>' ->
+  | Some ">" ->
       if not (is_empty (StrSlice.tail s)) then raise Fail;
       Lhtml (false, Hblank)
   | Some _ | None -> raise Fail
@@ -633,14 +657,17 @@ let closing_tag s =
 let special_tag tag s =
   if not (special_tag tag) then raise Fail;
   match StrSlice.head s with
-  | Some (' ' | '\t' | '\010' .. '\013' | '>') | None ->
+  | Some (" " | "\t" | "\010" | "\011" | "\012" | "\013" | ">") | None ->
       Lhtml (true, Hcontains [ "</script>"; "</pre>"; "</style>" ])
   | Some _ -> raise Fail
 
 let known_tag tag s =
   if not (known_tag tag) then raise Fail;
   match StrSlice.take 2 s with
-  | (' ' | '\t' | '\010' .. '\013') :: _ | [] | '>' :: _ | '/' :: '>' :: _ ->
+  | (" " | "\t" | "\010" | "\011" | "\012" | "\013") :: _
+  | []
+  | ">" :: _
+  | "/" :: ">" :: _ ->
       Lhtml (true, Hblank)
   | _ -> raise Fail
 
@@ -652,10 +679,21 @@ let ws1 s =
 
 let attribute_name s =
   match StrSlice.head s with
-  | Some ('a' .. 'z' | 'A' .. 'Z' | '_' | ':') ->
+  | Some
+      ( "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l"
+      | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x"
+      | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J"
+      | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V"
+      | "W" | "X" | "Y" | "Z" | "_" | ":" ) ->
       let rec loop s =
         match StrSlice.head s with
-        | Some ('a' .. 'z' | 'A' .. 'Z' | '_' | '.' | ':' | '0' .. '9') ->
+        | Some
+            ( "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k"
+            | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v"
+            | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G"
+            | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R"
+            | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "_" | "." | ":"
+            | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ) ->
             loop (StrSlice.tail s)
         | Some _ | None -> s
       in
@@ -664,7 +702,7 @@ let attribute_name s =
 
 let attribute_value s =
   match StrSlice.head s with
-  | Some (('\'' | '"') as c) ->
+  | Some (("'" | {|"|}) as c) ->
       let rec loop s =
         match StrSlice.head s with
         | Some c1 when c = c1 -> StrSlice.tail s
@@ -676,7 +714,8 @@ let attribute_value s =
       let rec loop first s =
         match StrSlice.head s with
         | Some
-            (' ' | '\t' | '\010' .. '\013' | '"' | '\'' | '=' | '<' | '>' | '`')
+            ( " " | "\t" | "\010" | "\011" | "\012" | "\013" | {|"|} | "'" | "="
+            | "<" | ">" | "`" )
         | None ->
             if first then raise Fail;
             s
@@ -690,7 +729,7 @@ let attribute s =
   let s = attribute_name s in
   let s = trim_leading_ws s in
   match StrSlice.head s with
-  | Some '=' ->
+  | Some "=" ->
       let s = trim_leading_ws (StrSlice.tail s) in
       attribute_value s
   | Some _ | None -> s
@@ -704,8 +743,8 @@ let open_tag s =
   let s = trim_leading_ws s in
   let n =
     match StrSlice.take 2 s with
-    | '/' :: '>' :: _ -> 2
-    | '>' :: _ -> 1
+    | "/" :: ">" :: _ -> 2
+    | ">" :: _ -> 1
     | _ -> raise Fail
   in
   if not (is_empty (StrSlice.drop n s)) then raise Fail;
@@ -713,15 +752,15 @@ let open_tag s =
 
 let raw_html s =
   match StrSlice.take 10 s with
-  | '<' :: '?' :: _ -> Lhtml (true, Hcontains [ "?>" ])
-  | '<' :: '!' :: '-' :: '-' :: _ -> Lhtml (true, Hcontains [ "-->" ])
-  | '<' :: '!' :: '[' :: 'C' :: 'D' :: 'A' :: 'T' :: 'A' :: '[' :: _ ->
+  | "<" :: "?" :: _ -> Lhtml (true, Hcontains [ "?>" ])
+  | "<" :: "!" :: "-" :: "-" :: _ -> Lhtml (true, Hcontains [ "-->" ])
+  | "<" :: "!" :: "[" :: "C" :: "D" :: "A" :: "T" :: "A" :: "[" :: _ ->
       Lhtml (true, Hcontains [ "]]>" ])
-  | '<' :: '!' :: _ -> Lhtml (true, Hcontains [ ">" ])
-  | '<' :: '/' :: _ ->
+  | "<" :: "!" :: _ -> Lhtml (true, Hcontains [ ">" ])
+  | "<" :: "/" :: _ ->
       let tag, s = tag_name (StrSlice.drop 2 s) in
       (known_tag tag ||| closing_tag) s
-  | '<' :: _ ->
+  | "<" :: _ ->
       let tag, s = tag_name (StrSlice.drop 1 s) in
       (special_tag tag ||| known_tag tag ||| open_tag) s
   | _ -> raise Fail
@@ -733,15 +772,16 @@ let blank s =
 let tag_string s =
   let buf = Buffer.create 17 in
   let s, a =
-    match StrSlice.last s with Some '}' -> attribute_string s | _ -> (s, [])
+    match StrSlice.last s with Some "}" -> attribute_string s | _ -> (s, [])
   in
   let s = trim_ws s in
   let rec loop s =
     match StrSlice.head s with
     (* TODO use is_whitespace *)
-    | Some (' ' | '\t' | '\010' .. '\013') | None -> (Buffer.contents buf, a)
+    | Some (" " | "\t" | "\010" | "\011" | "\012" | "\013") | None ->
+        (Buffer.contents buf, a)
     | Some c ->
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop (StrSlice.tail s)
   in
   loop (trim_leading_ws s)
@@ -761,7 +801,7 @@ let indented_code ind s =
    characters. *)
 let table_row ~pipe_prefix s =
   let rec loop items seen_pipe s =
-    match StrSlice.index_unescaped '|' s with
+    match StrSlice.index_unescaped "|" s with
     | None ->
         if StrSlice.for_all is_whitespace s then (items, seen_pipe)
         else (s :: items, false)
@@ -778,27 +818,27 @@ let table_row ~pipe_prefix s =
 let parse s0 =
   let ind, s = sp3 s0 in
   match StrSlice.head s with
-  | Some '>' ->
+  | Some ">" ->
       let s = StrSlice.offset 1 s in
       let s = if indent s > 0 then StrSlice.offset 1 s else s in
       Lblockquote s
-  | Some '=' -> (setext_heading ||| table_row ~pipe_prefix:false) s
-  | Some '-' ->
+  | Some "=" -> (setext_heading ||| table_row ~pipe_prefix:false) s
+  | Some "-" ->
       (setext_heading
       ||| thematic_break
       ||| unordered_list_item ind
       ||| table_row ~pipe_prefix:false)
         s
-  | Some '_' -> thematic_break s
-  | Some '#' -> atx_heading s
-  | Some ('~' | '`') -> fenced_code ind s
-  | Some '<' -> raw_html s
-  | Some '*' -> (thematic_break ||| unordered_list_item ind) s
-  | Some '+' -> unordered_list_item ind s
-  | Some '0' .. '9' ->
+  | Some "_" -> thematic_break s
+  | Some "#" -> atx_heading s
+  | Some ("~" | "`") -> fenced_code ind s
+  | Some "<" -> raw_html s
+  | Some "*" -> (thematic_break ||| unordered_list_item ind) s
+  | Some "+" -> unordered_list_item ind s
+  | Some ("0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") ->
       (ordered_list_item ind ||| table_row ~pipe_prefix:false) s
-  | Some ':' -> (def_list ||| table_row ~pipe_prefix:false) s
-  | Some '|' -> table_row ~pipe_prefix:true (StrSlice.tail s)
+  | Some ":" -> (def_list ||| table_row ~pipe_prefix:false) s
+  | Some "|" -> table_row ~pipe_prefix:true (StrSlice.tail s)
   | Some _ -> (blank ||| indented_code ind ||| table_row ~pipe_prefix:false) s
   | None -> Lempty
 
@@ -826,18 +866,18 @@ let inline_attribute_string s =
   ws s;
   let a =
     match peek s with
-    | Some '{' ->
+    | Some "{" ->
         let buf = Buffer.create 64 in
         let rec loop s pos =
           match peek s with
-          | Some '}' ->
+          | Some "}" ->
               junk s;
               Some (Buffer.contents buf)
-          | None | Some '{' ->
+          | None | Some "{" ->
               set_pos s pos;
               None
           | Some c ->
-              Buffer.add_char buf c;
+              Buffer.add_string buf c;
               junk s;
               loop s pos
         in
@@ -898,19 +938,19 @@ module Pre = struct
     | _ -> false
 
   let classify_delim = function
-    | '!' | '"' | '#' | '$' | '%' | '&' | '\'' | '(' | ')' | '*' | '+' | ','
-    | '-' | '.' | '/' | ':' | ';' | '<' | '=' | '>' | '?' | '@' | '[' | '\\'
-    | ']' | '^' | '_' | '`' | '{' | '|' | '}' | '~' ->
+    | "!" | {|"|} | "#" | "$" | "%" | "&" | "'" | "(" | ")" | "*" | "+" | ","
+    | "-" | "." | "/" | ":" | ";" | "<" | "=" | ">" | "?" | "@" | "[" | "\\"
+    | "]" | "^" | "_" | "`" | "{" | "|" | "}" | "~" ->
         Punct
-    | ' ' | '\t' | '\010' .. '\013' | '\160' -> Ws
+    | " " | "\t" | "\010" | "\011" | "\012" | "\013" | "\160" -> Ws
     | _ -> Other
 
   let to_r = function
     | Bang_left_bracket -> Text ([], "![")
     | Left_bracket Img -> Text ([], "![")
     | Left_bracket Url -> Text ([], "[")
-    | Emph (_, _, Star, n) -> Text ([], String.make n '*')
-    | Emph (_, _, Underscore, n) -> Text ([], String.make n '_')
+    | Emph (_, _, Star, n) -> Text ([], Stdlib.String.make n '*')
+    | Emph (_, _, Underscore, n) -> Text ([], Stdlib.String.make n '_')
     | R x -> x
 
   let rec find_next_emph = function
@@ -1043,51 +1083,51 @@ module Pre = struct
 end
 
 let escape buf st =
-  if next st <> '\\' then raise Fail;
+  if next st <> "\\" then raise Fail;
   match peek st with
   | Some c when is_punct c ->
       junk st;
-      Buffer.add_char buf c
-  | Some _ | None -> Buffer.add_char buf '\\'
+      Buffer.add_string buf c
+  | Some _ | None -> Buffer.add_string buf "\\"
 
 let link_label allow_balanced_brackets st =
-  if peek_exn st <> '[' then raise Fail;
+  if peek_exn st <> "[" then raise Fail;
   junk st;
   let buf = Buffer.create 17 in
   let rec loop n nonempty =
     match peek_exn st with
-    | ']' when n = 0 ->
+    | "]" when n = 0 ->
         junk st;
         if not nonempty then raise Fail;
         Buffer.contents buf
-    | ']' as c ->
+    | "]" as c ->
         assert (n > 0);
         junk st;
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop (pred n) true
-    | '\\' as c ->
+    | "\\" as c ->
         junk st;
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         begin
           match peek_exn st with
           | c when is_punct c ->
               junk st;
-              Buffer.add_char buf c
+              Buffer.add_string buf c
           | _ -> ()
         end;
         loop n true
-    | '[' when not allow_balanced_brackets -> raise Fail
-    | '[' as c ->
+    | "[" when not allow_balanced_brackets -> raise Fail
+    | "[" as c ->
         junk st;
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop (succ n) true
     | w when is_whitespace w ->
         junk st;
-        Buffer.add_char buf w;
+        Buffer.add_string buf w;
         loop n nonempty
     | c ->
         junk st;
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop n true
   in
   loop 0 false
@@ -1106,11 +1146,21 @@ let normalize =
 
 let tag_name st =
   match peek_exn st with
-  | 'a' .. 'z' | 'A' .. 'Z' ->
+  | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
+  | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
+  | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M"
+  | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z"
+    ->
       junk st;
       let rec loop () =
         match peek st with
-        | Some ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-') ->
+        | Some
+            ( "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k"
+            | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v"
+            | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G"
+            | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R"
+            | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2"
+            | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "-" ) ->
             junk st;
             loop ()
         | Some _ | None -> ()
@@ -1122,7 +1172,7 @@ let ws_buf buf st =
   let rec loop () =
     match peek st with
     | Some w when is_whitespace w ->
-        Buffer.add_char buf w;
+        Buffer.add_string buf w;
         junk st;
         loop ()
     | Some _ | None -> ()
@@ -1131,11 +1181,11 @@ let ws_buf buf st =
 
 let closing_tag st =
   let start = pos st in
-  if next st <> '<' then raise Fail;
-  if next st <> '/' then raise Fail;
+  if next st <> "<" then raise Fail;
+  if next st <> "/" then raise Fail;
   tag_name st;
   ws st;
-  if next st <> '>' then raise Fail;
+  if next st <> ">" then raise Fail;
   range st start (pos st - start)
 
 let list p st =
@@ -1145,10 +1195,10 @@ let list p st =
   loop ()
 
 let single_quoted_attribute st =
-  if next st <> '\'' then raise Fail;
+  if next st <> "'" then raise Fail;
   let rec loop () =
     match peek_exn st with
-    | '\'' -> junk st
+    | "'" -> junk st
     (* | '&' -> *)
     (*     entity buf st; loop () *)
     | _ ->
@@ -1158,10 +1208,10 @@ let single_quoted_attribute st =
   loop ()
 
 let double_quoted_attribute st =
-  if next st <> '"' then raise Fail;
+  if next st <> {|"|} then raise Fail;
   let rec loop () =
     match peek_exn st with
-    | '"' -> junk st
+    | {|"|} -> junk st
     (* | '&' -> *)
     (*     entity buf st; loop () *)
     | _ ->
@@ -1173,7 +1223,8 @@ let double_quoted_attribute st =
 let unquoted_attribute st =
   let rec loop n =
     match peek_exn st with
-    | ' ' | '\t' | '\010' .. '\013' | '"' | '\'' | '=' | '<' | '>' | '`' ->
+    | " " | "\t" | "\010" | "\011" | "\012" | "\013" | {|"|} | "'" | "=" | "<"
+    | ">" | "`" ->
         if n = 0 then raise Fail
     (* | '&' -> *)
     (*     entity buf st; loop () *)
@@ -1185,17 +1236,28 @@ let unquoted_attribute st =
 
 let attribute_value st =
   match peek_exn st with
-  | '\'' -> single_quoted_attribute st
-  | '"' -> double_quoted_attribute st
+  | "'" -> single_quoted_attribute st
+  | {|"|} -> double_quoted_attribute st
   | _ -> unquoted_attribute st
 
 let attribute_name st =
   match peek_exn st with
-  | 'a' .. 'z' | 'A' .. 'Z' | '_' | ':' ->
+  | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
+  | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
+  | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M"
+  | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z"
+  | "_" | ":" ->
       junk st;
       let rec loop () =
         match peek st with
-        | Some ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '.' | ':' | '-') ->
+        | Some
+            ( "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k"
+            | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v"
+            | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G"
+            | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R"
+            | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2"
+            | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "_" | "." | ":" | "-" )
+          ->
             junk st;
             loop ()
         | Some _ | None -> ()
@@ -1205,7 +1267,7 @@ let attribute_name st =
 
 let option d p st = match protect p st with r -> r | exception Fail -> d
 let some p st = Some (p st)
-let attribute_value_specification = ws >>> char '=' >>> ws >>> attribute_value
+let attribute_value_specification = ws >>> char "=" >>> ws >>> attribute_value
 
 let ws1_buf buf st =
   match peek st with
@@ -1219,143 +1281,147 @@ let attribute st =
 
 let open_tag st =
   let start = pos st in
-  if next st <> '<' then raise Fail;
+  if next st <> "<" then raise Fail;
   tag_name st;
   list attribute st;
   ws st;
   begin
-    match peek_exn st with '/' -> junk st | _ -> ()
+    match peek_exn st with "/" -> junk st | _ -> ()
   end;
-  if next st <> '>' then raise Fail;
+  if next st <> ">" then raise Fail;
   range st start (pos st - start)
 
 let html_comment st =
   let buf = Buffer.create 17 in
-  if next st <> '<' then raise Fail;
-  if next st <> '!' then raise Fail;
-  if next st <> '-' then raise Fail;
-  if next st <> '-' then raise Fail;
+  if next st <> "<" then raise Fail;
+  if next st <> "!" then raise Fail;
+  if next st <> "-" then raise Fail;
+  if next st <> "-" then raise Fail;
   Buffer.add_string buf "<!--";
   let rec loop start =
     match peek_exn st with
-    | '-' as c -> (
+    | "-" as c -> (
         junk st;
         match peek_exn st with
-        | '-' ->
+        | "-" ->
             junk st;
-            if next st <> '>' then raise Fail;
+            if next st <> ">" then raise Fail;
             Buffer.add_string buf "-->";
             Buffer.contents buf
-        | '>' when start -> raise Fail
+        | ">" when start -> raise Fail
         | _ ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop false)
-    | '>' when start -> raise Fail
-    | '&' ->
+    | ">" when start -> raise Fail
+    | "&" ->
         entity buf st;
         loop false
     | _ as c ->
         junk st;
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop false
   in
   loop true
 
 let processing_instruction st =
   let buf = Buffer.create 17 in
-  if next st <> '<' then raise Fail;
-  if next st <> '?' then raise Fail;
+  if next st <> "<" then raise Fail;
+  if next st <> "?" then raise Fail;
   Buffer.add_string buf "<?";
   let rec loop () =
     match peek_exn st with
-    | '?' as c -> (
+    | "?" as c -> (
         junk st;
         match peek_exn st with
-        | '>' ->
+        | ">" ->
             junk st;
             Buffer.add_string buf "?>";
             Buffer.contents buf
         | _ ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ())
-    | '&' ->
+    | "&" ->
         entity buf st;
         loop ()
     | _ as c ->
         junk st;
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop ()
   in
   loop ()
 
 let cdata_section st =
   let buf = Buffer.create 17 in
-  if next st <> '<' then raise Fail;
-  if next st <> '!' then raise Fail;
-  if next st <> '[' then raise Fail;
-  if next st <> 'C' then raise Fail;
-  if next st <> 'D' then raise Fail;
-  if next st <> 'A' then raise Fail;
-  if next st <> 'T' then raise Fail;
-  if next st <> 'A' then raise Fail;
-  if next st <> '[' then raise Fail;
+  if next st <> "<" then raise Fail;
+  if next st <> "!" then raise Fail;
+  if next st <> "[" then raise Fail;
+  if next st <> "C" then raise Fail;
+  if next st <> "D" then raise Fail;
+  if next st <> "A" then raise Fail;
+  if next st <> "T" then raise Fail;
+  if next st <> "A" then raise Fail;
+  if next st <> "[" then raise Fail;
   Buffer.add_string buf "<![CDATA[";
   let rec loop () =
     match peek_exn st with
-    | ']' as c -> (
+    | "]" as c -> (
         junk st;
         match peek_exn st with
-        | ']' as c1 -> (
+        | "]" as c1 -> (
             junk st;
             match peek_exn st with
-            | '>' ->
+            | ">" ->
                 junk st;
                 Buffer.add_string buf "]]>";
                 Buffer.contents buf
             | _ ->
-                Buffer.add_char buf c;
-                Buffer.add_char buf c1;
+                Buffer.add_string buf c;
+                Buffer.add_string buf c1;
                 loop ())
         | _ ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ())
-    | '&' ->
+    | "&" ->
         entity buf st;
         loop ()
     | _ as c ->
         junk st;
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop ()
   in
   loop ()
 
 let declaration st =
   let buf = Buffer.create 17 in
-  if next st <> '<' then raise Fail;
-  if next st <> '!' then raise Fail;
+  if next st <> "<" then raise Fail;
+  if next st <> "!" then raise Fail;
   Buffer.add_string buf "<!";
   match peek_exn st with
-  | 'A' .. 'Z' ->
+  | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
+  | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
+    ->
       let rec loop () =
         match peek_exn st with
-        | 'A' .. 'Z' as c ->
+        | ( "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k"
+          | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v"
+          | "w" | "x" | "y" | "z" ) as c ->
             junk st;
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ()
         | w when is_whitespace w ->
             ws1_buf buf st;
             let rec loop () =
               match peek_exn st with
-              | '>' as c ->
+              | ">" as c ->
                   junk st;
-                  Buffer.add_char buf c;
+                  Buffer.add_string buf c;
                   Buffer.contents buf
-              | '&' ->
+              | "&" ->
                   entity buf st;
                   loop ()
               | _ as c ->
                   junk st;
-                  Buffer.add_char buf c;
+                  Buffer.add_string buf c;
                   loop ()
             in
             loop ()
@@ -1367,70 +1433,76 @@ let declaration st =
 let link_destination st =
   let buf = Buffer.create 17 in
   match peek_exn st with
-  | '<' ->
+  | "<" ->
       junk st;
       let rec loop () =
         match peek_exn st with
-        | '>' ->
+        | ">" ->
             junk st;
             Buffer.contents buf
-        | '\010' .. '\013' | '<' -> raise Fail
-        | '\\' ->
+        | "\010" | "\011" | "\012" | "\013" | "<" -> raise Fail
+        | "\\" ->
             escape buf st;
             loop ()
-        | '&' ->
+        | "&" ->
             entity buf st;
             loop ()
         | _ as c ->
             junk st;
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ()
       in
       loop ()
   | _ ->
       let rec loop n =
         match peek st with
-        | Some ('(' as c) ->
+        | Some ("(" as c) ->
             junk st;
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop (succ n)
-        | Some ')' when n = 0 ->
+        | Some ")" when n = 0 ->
             if Buffer.length buf = 0 then raise Fail;
             Buffer.contents buf
-        | Some (')' as c) ->
+        | Some (")" as c) ->
             junk st;
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop (pred n)
-        | Some '\\' ->
+        | Some "\\" ->
             escape buf st;
             loop n
-        | Some '&' ->
+        | Some "&" ->
             entity buf st;
             loop n
-        | Some (' ' | '\t' | '\x00' .. '\x1F' | '\x7F') | None ->
+        | Some
+            ( " " | "\t" | "\x00" | "\x01" | "\x02" | "\x03" | "\x04" | "\x05"
+            | "\x06" | "\x07" | "\x08" | "\x0A" | "\x0B" | "\x0C" | "\x0D"
+            | "\x0E" | "\x0F" | "\x10" | "\x11" | "\x12" | "\x13" | "\x14"
+            | "\x15" | "\x16" | "\x17" | "\x18" | "\x19" | "\x1A" | "\x1B"
+            | "\x1C" | "\x1D" | "\x1E" | "\x1F" | "\x7F" )
+        | None ->
             if n > 0 || Buffer.length buf = 0 then raise Fail;
             Buffer.contents buf
         | Some c ->
             junk st;
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop n
       in
       loop 0
 
 let eol st =
-  match peek st with Some '\n' -> junk st | Some _ -> raise Fail | None -> ()
+  match peek st with Some "\n" -> junk st | Some _ -> raise Fail | None -> ()
 
 let link_title st =
   let buf = Buffer.create 17 in
   match peek_exn st with
-  | ('\'' | '"') as c ->
+  | ("'" | {|"|}) as c ->
       junk st;
       let rec loop () =
         match peek_exn st with
-        | '\\' ->
+        | "\\" ->
             escape buf st;
             loop ()
-        | '&' ->
+        | "&" ->
             entity buf st;
             loop ()
         | _ as c1 when c = c1 ->
@@ -1438,32 +1510,32 @@ let link_title st =
             Buffer.contents buf
         | _ as c1 ->
             junk st;
-            Buffer.add_char buf c1;
+            Buffer.add_string buf c1;
             loop ()
       in
       loop ()
-  | '(' ->
+  | "(" ->
       junk st;
       let rec loop () =
         match peek_exn st with
-        | '\\' ->
+        | "\\" ->
             escape buf st;
             loop ()
-        | '&' ->
+        | "&" ->
             entity buf st;
             loop ()
-        | ')' ->
+        | ")" ->
             junk st;
             Buffer.contents buf
         | _ as c ->
             junk st;
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ()
       in
       loop ()
   | _ -> raise Fail
 
-let space st = match peek_exn st with ' ' -> junk st | _ -> raise Fail
+let space st = match peek_exn st with " " -> junk st | _ -> raise Fail
 
 let many p st =
   try
@@ -1474,11 +1546,21 @@ let many p st =
 
 let scheme st =
   match peek_exn st with
-  | 'a' .. 'z' | 'A' .. 'Z' ->
+  | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m"
+  | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z"
+  | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M"
+  | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z"
+    ->
       let rec loop n =
         if n < 32 then
           match peek st with
-          | Some ('a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '+' | '.' | '-') ->
+          | Some
+              ( "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k"
+              | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v"
+              | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G"
+              | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R"
+              | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2"
+              | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "+" | "." | "-" ) ->
               junk st;
               loop (succ n)
           | Some _ | None -> n
@@ -1491,15 +1573,19 @@ let scheme st =
 let absolute_uri st =
   let p = pos st in
   scheme st;
-  if next st <> ':' then raise Fail;
+  if next st <> ":" then raise Fail;
   let rec loop () =
     match peek st with
     | Some
-        ( ' ' | '\t'
-        | '\010' .. '\013'
-        | '\x00' .. '\x1F'
-        | '\x7F' .. '\x9F'
-        | '<' | '>' )
+        ( " " | "\t" | "\010" | "\011" | "\012" | "\013" | "\x00" | "\x01"
+        | "\x02" | "\x03" | "\x04" | "\x05" | "\x06" | "\x07" | "\x08" | "\x0E"
+        | "\x0F" | "\x10" | "\x11" | "\x12" | "\x13" | "\x14" | "\x15" | "\x16"
+        | "\x17" | "\x18" | "\x19" | "\x1A" | "\x1B" | "\x1C" | "\x1D" | "\x1E"
+        | "\x1F" | "\x7F" | "\x80" | "\x81" | "\x82" | "\x83" | "\x84" | "\x85"
+        | "\x86" | "\x87" | "\x88" | "\x89" | "\x8A" | "\x8B" | "\x8C" | "\x8D"
+        | "\x8E" | "\x8F" | "\x90" | "\x91" | "\x92" | "\x93" | "\x94" | "\x95"
+        | "\x96" | "\x97" | "\x98" | "\x99" | "\x9A" | "\x9B" | "\x9C" | "\x9D"
+        | "\x9E" | "\x9F" | "<" | ">" )
     | None ->
         let txt = range st p (pos st - p) in
         (txt, txt)
@@ -1513,22 +1599,29 @@ let email_address st =
   let p = pos st in
   let rec loop n =
     match peek_exn st with
-    | 'a' .. 'z'
-    | 'A' .. 'Z'
-    | '0' .. '9'
-    | '.' | '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '/' | '=' | '?'
-    | '^' | '_' | '`' | '{' | '|' | '}' | '~' | '-' ->
+    | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l"
+    | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x"
+    | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J"
+    | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V"
+    | "W" | "X" | "Y" | "Z" | "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7"
+    | "8" | "9" | "." | "!" | "#" | "$" | "%" | "&" | "'" | "*" | "+" | "/"
+    | "=" | "?" | "^" | "_" | "`" | "{" | "|" | "}" | "~" | "-" ->
         junk st;
         loop (succ n)
-    | '@' ->
+    | "@" ->
         junk st;
         let label st =
           let let_dig st =
             match peek_exn st with
-            | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' ->
+            | "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k"
+            | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v"
+            | "w" | "x" | "y" | "z" | "A" | "B" | "C" | "D" | "E" | "F" | "G"
+            | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R"
+            | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" | "0" | "1" | "2"
+            | "3" | "4" | "5" | "6" | "7" | "8" | "9" ->
                 junk st;
                 false
-            | '-' ->
+            | "-" ->
                 junk st;
                 true
             | _ -> raise Fail
@@ -1542,7 +1635,7 @@ let email_address st =
           loop false
         in
         label st;
-        list (char '.' >>> label) st;
+        list (char "." >>> label) st;
         let txt = range st p (pos st - p) in
         (txt, "mailto:" ^ txt)
     | _ -> raise Fail
@@ -1551,21 +1644,21 @@ let email_address st =
 
 let autolink st =
   match peek_exn st with
-  | '<' ->
+  | "<" ->
       junk st;
       let label, destination = (absolute_uri ||| email_address) st in
-      if next st <> '>' then raise Fail;
+      if next st <> ">" then raise Fail;
       { Ast.Impl.label = Text ([], label); destination; title = None }
   | _ -> raise Fail
 
 let inline_link =
-  char '('
+  char "("
   >>> ws
   >>> option
         ("", None)
         (pair link_destination (option None (ws1 >>> some link_title)))
   <<< ws
-  <<< char ')'
+  <<< char ")"
 
 let get_buf buf =
   let s = Buffer.contents buf in
@@ -1579,7 +1672,7 @@ let inline_pre buf acc st =
   let pos = pos st in
   let rec gobble_open_backtick n =
     match peek st with
-    | Some '`' ->
+    | Some "`" ->
         junk st;
         gobble_open_backtick (succ n)
     | Some _ ->
@@ -1588,11 +1681,11 @@ let inline_pre buf acc st =
         let finish () =
           let content = Buffer.contents bufcode in
           let content =
-            if String.for_all (fun c -> c = ' ') content then content
+            if ((Js.String.trim content) == "") then content
             else if
               String.length content >= 2
-              && content.[0] = ' '
-              && content.[String.length content - 1] = ' '
+              && content.[0] = " "
+              && content.[String.length content - 1] = " "
             then String.sub content 1 (String.length content - 2)
             else content
           in
@@ -1601,20 +1694,20 @@ let inline_pre buf acc st =
         in
         let rec gobble_body start m =
           match peek st with
-          | Some '`' ->
+          | Some "`" ->
               junk st;
               gobble_body start (succ m)
           | _ when m = n -> finish ()
           | Some c when is_whitespace c ->
-              if m > 0 then Buffer.add_string bufcode (String.make m '`');
-              Buffer.add_char bufcode (if c = '\010' then ' ' else c);
+              if m > 0 then Buffer.add_string bufcode (Stdlib.String.make m '`');
+              Buffer.add_string bufcode (if c = "\010" then " " else c);
               junk st;
               gobble_body (start && m = 0) 0
           | Some c ->
               junk st;
-              (* if seen_ws then Buffer.add_char bufcode ' '; *)
-              if m > 0 then Buffer.add_string bufcode (String.make m '`');
-              Buffer.add_char bufcode c;
+              (* if seen_ws then Buffer.add_string bufcode " "; *)
+              if m > 0 then Buffer.add_string bufcode (Stdlib.String.make m '`');
+              Buffer.add_string bufcode c;
               gobble_body false 0
           | None ->
               Buffer.add_string buf (range st pos n);
@@ -1623,7 +1716,7 @@ let inline_pre buf acc st =
         in
         gobble_body true 0
     | None ->
-        Buffer.add_string buf (String.make n '`');
+        Buffer.add_string buf (Stdlib.String.make n '`');
         acc
   in
   gobble_open_backtick 0
@@ -1652,15 +1745,15 @@ let rec inline defs st =
               in
               loop (Pre.R r :: text acc) st
           | None ->
-              if kind = Img then Buffer.add_char buf '!';
-              Buffer.add_char buf '[';
+              if kind = Img then Buffer.add_string buf "!";
+              Buffer.add_string buf "[";
               let acc = text acc in
               set_pos st (succ off0);
               loop acc st
         in
         match peek st with
-        | Some '[' -> (
-            if peek_after '\000' st = ']' then (
+        | Some "[" -> (
+            if peek_after "\000" st = "]" then (
               junk st;
               junk st;
               reflink lab)
@@ -1671,7 +1764,7 @@ let rec inline defs st =
                   junk st;
                   loop (Left_bracket kind :: text acc) st
               | exception Fail -> reflink lab)
-        | Some '(' -> (
+        | Some "(" -> (
             match protect inline_link st with
             | _ ->
                 set_pos st off0;
@@ -1684,7 +1777,7 @@ let rec inline defs st =
         loop (Left_bracket kind :: text acc) st
   and loop ~seen_link acc st =
     match peek_exn st with
-    | '<' as c -> (
+    | "<" as c -> (
         match protect autolink st with
         | def ->
             let attr = inline_attribute_string st in
@@ -1703,61 +1796,61 @@ let rec inline defs st =
             | tag -> loop ~seen_link (Pre.R (Html ([], tag)) :: text acc) st
             | exception Fail ->
                 junk st;
-                Buffer.add_char buf c;
+                Buffer.add_string buf c;
                 loop ~seen_link acc st))
-    | '\n' ->
+    | "\n" ->
         junk st;
         sp st;
         loop ~seen_link (Pre.R (Soft_break []) :: text acc) st
-    | ' ' as c -> (
+    | " " as c -> (
         junk st;
         match peek st with
-        | Some ' ' -> (
-            match protect (many space >>> char '\n' >>> many space) st with
+        | Some " " -> (
+            match protect (many space >>> char "\n" >>> many space) st with
             | () -> loop ~seen_link (Pre.R (Hard_break []) :: text acc) st
             | exception Fail ->
                 junk st;
                 Buffer.add_string buf "  ";
                 loop ~seen_link acc st)
-        | Some '\n' -> loop ~seen_link acc st
+        | Some "\n" -> loop ~seen_link acc st
         | Some _ | None ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ~seen_link acc st)
-    | '`' -> loop ~seen_link (inline_pre buf acc st) st
-    | '\\' as c -> (
+    | "`" -> loop ~seen_link (inline_pre buf acc st) st
+    | "\\" as c -> (
         junk st;
         match peek st with
-        | Some '\n' ->
+        | Some "\n" ->
             junk st;
             loop ~seen_link (Pre.R (Hard_break []) :: text acc) st
         | Some c when is_punct c ->
             junk st;
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ~seen_link acc st
         | Some _ | None ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ~seen_link acc st)
-    | '!' as c -> (
+    | "!" as c -> (
         junk st;
         match peek st with
-        | Some '[' -> reference_link ~seen_link Img (text acc) st
+        | Some "[" -> reference_link ~seen_link Img (text acc) st
         | Some _ | None ->
-            Buffer.add_char buf c;
+            Buffer.add_string buf c;
             loop ~seen_link acc st)
-    | '&' ->
+    | "&" ->
         entity buf st;
         loop ~seen_link acc st
-    | ']' ->
+    | "]" ->
         junk st;
         let acc = text acc in
         let rec aux ~seen_link xs = function
           | Pre.Left_bracket Url :: acc' when seen_link ->
-              Buffer.add_char buf ']';
+              Buffer.add_string buf "]";
               let acc' = List.rev_append (Pre.R (Text ([], "[")) :: xs) acc' in
               loop ~seen_link acc' st
           | Left_bracket k :: acc' -> (
               match peek st with
-              | Some '(' -> (
+              | Some "(" -> (
                   match protect inline_link st with
                   | destination, title ->
                       let attr = inline_attribute_string st in
@@ -1770,9 +1863,9 @@ let rec inline defs st =
                       in
                       loop ~seen_link (Pre.R r :: acc') st
                   | exception Fail ->
-                      Buffer.add_char buf ']';
+                      Buffer.add_string buf "]";
                       loop ~seen_link acc st)
-              | Some '[' -> (
+              | Some "[" -> (
                   let label = Pre.parse_emph xs in
                   let off1 = pos st in
                   match link_label false st with
@@ -1795,36 +1888,36 @@ let rec inline defs st =
                           in
                           loop ~seen_link (Pre.R r :: acc') st
                       | None ->
-                          if k = Img then Buffer.add_char buf '!';
-                          Buffer.add_char buf '[';
+                          if k = Img then Buffer.add_string buf "!";
+                          Buffer.add_string buf "[";
                           let acc = Pre.R label :: text acc' in
-                          Buffer.add_char buf ']';
+                          Buffer.add_string buf "]";
                           set_pos st off1;
                           loop ~seen_link acc st)
                   | exception Fail ->
-                      if k = Img then Buffer.add_char buf '!';
-                      Buffer.add_char buf '[';
+                      if k = Img then Buffer.add_string buf "!";
+                      Buffer.add_string buf "[";
                       let acc = Pre.R label :: text acc in
-                      Buffer.add_char buf ']';
+                      Buffer.add_string buf "]";
                       set_pos st off1;
                       loop ~seen_link acc st)
               | Some _ | None ->
-                  Buffer.add_char buf ']';
+                  Buffer.add_string buf "]";
                   loop ~seen_link acc st)
           | (Pre.R (Link _) as x) :: acc' -> aux ~seen_link:true (x :: xs) acc'
           | x :: acc' -> aux ~seen_link (x :: xs) acc'
           | [] ->
-              Buffer.add_char buf ']';
+              Buffer.add_string buf "]";
               loop ~seen_link acc st
         in
         aux ~seen_link [] acc
-    | '[' -> reference_link ~seen_link Url acc st
-    | ('*' | '_') as c ->
-        let pre = peek_before ' ' st in
+    | "[" -> reference_link ~seen_link Url acc st
+    | ("*" | "_") as c ->
+        let pre = peek_before " " st in
         let f post n st =
           let pre = pre |> Pre.classify_delim in
           let post = post |> Pre.classify_delim in
-          let e = if c = '*' then Pre.Star else Pre.Underscore in
+          let e = if c = "*" then Pre.Star else Pre.Underscore in
           loop ~seen_link (Pre.Emph (pre, post, e, n) :: text acc) st
         in
         let rec aux n =
@@ -1833,12 +1926,12 @@ let rec inline defs st =
               junk st;
               aux (succ n)
           | Some c1 -> f c1 n st
-          | None -> f ' ' n st
+          | None -> f " " n st
         in
         aux 0
     | _ as c ->
         junk st;
-        Buffer.add_char buf c;
+        Buffer.add_string buf c;
         loop ~seen_link acc st
     | exception Fail -> Pre.parse_emph (List.rev (text acc))
   in
@@ -1846,13 +1939,13 @@ let rec inline defs st =
 
 let sp3 st =
   match peek_exn st with
-  | ' ' -> (
+  | " " -> (
       junk st;
       match peek_exn st with
-      | ' ' -> (
+      | " " -> (
           junk st;
           match peek_exn st with
-          | ' ' ->
+          | " " ->
               junk st;
               3
           | _ -> 2
@@ -1870,7 +1963,7 @@ let link_reference_definition st : attributes link_def =
       | Some w when is_whitespace w ->
           junk st;
           loop seen_nl
-      | Some '\n' when not seen_nl ->
+      | Some "\n" when not seen_nl ->
           junk st;
           loop true
       | Some _ | None -> ()
@@ -1882,7 +1975,7 @@ let link_reference_definition st : attributes link_def =
   in
   ignore (sp3 st);
   let label = link_label false st in
-  if next st <> ':' then raise Fail;
+  if next st <> ":" then raise Fail;
   ws st;
   let destination = link_destination st in
   let attributes = inline_attribute_string st in

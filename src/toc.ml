@@ -56,7 +56,7 @@ let rec find_start headers level number subsections =
       (* Sought [level] has not been found in the current section *)
       []
 
-let unordered_list items = List ([], Bullet '*', Tight, items)
+let unordered_list items = List ([], Bullet "*", Tight, items)
 
 let find_id attributes =
   List.find_map

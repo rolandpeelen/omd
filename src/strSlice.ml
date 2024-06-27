@@ -1,3 +1,5 @@
+open Utils
+
 type t =
   { base : string
   ; off : int
@@ -17,7 +19,7 @@ let offset n { base; off; len } =
     if n = 0 || len = 0 then { base; off; len }
     else
       match base.[off] with
-      | '\t' ->
+      | "\t" ->
           let ts = ((off + 4) / 4 * 4) - off in
           let b = Buffer.create len in
           Buffer.add_substring b base 0 off;
@@ -127,18 +129,18 @@ let index_unescaped sep s =
       (* If we get here and we're inside a verbatim span, what to do? *)
     else
       match (state, s.base.[idx]) with
-      | `normal, '\\' -> loop (idx + 1) `escape
-      | `normal, '`' -> loop (idx + 1) (`verbatim_open 1)
+      | `normal, "\\" -> loop (idx + 1) `escape
+      | `normal, "`" -> loop (idx + 1) (`verbatim_open 1)
       | `normal, c when c = sep -> Some (idx - s.off)
       | `normal, _ -> loop (idx + 1) `normal
       | `escape, _ -> loop (idx + 1) `normal
-      | `verbatim_open n, '`' -> loop (idx + 1) (`verbatim_open (n + 1))
+      | `verbatim_open n, "`" -> loop (idx + 1) (`verbatim_open (n + 1))
       | `verbatim_open n, _ -> loop (idx + 1) (`within_verbatim n)
-      | `within_verbatim 1, '`' -> loop (idx + 1) `normal
-      | `within_verbatim n, '`' -> loop (idx + 1) (`verbatim_close (n, n - 1))
+      | `within_verbatim 1, "`" -> loop (idx + 1) `normal
+      | `within_verbatim n, "`" -> loop (idx + 1) (`verbatim_close (n, n - 1))
       | `within_verbatim n, _ -> loop (idx + 1) (`within_verbatim n)
-      | `verbatim_close (_, 1), '`' -> loop (idx + 1) `normal
-      | `verbatim_close (n, k), '`' ->
+      | `verbatim_close (_, 1), "`" -> loop (idx + 1) `normal
+      | `verbatim_close (n, k), "`" ->
           loop (idx + 1) (`verbatim_close (n, k - 1))
       | `verbatim_close (n, _), _ -> loop (idx + 1) (`within_verbatim n)
   in
@@ -170,7 +172,8 @@ let fold_left f init s =
 (*   assert (fold_left (fun c s -> String.make 2 c ^ s) "" s = "eeddccbbaa") *)
 
 let trim s =
-  let is_whitespace = function
+  let is_whitespace =
+    String.to_char >> function
     | ' ' | '\t' | '\010' .. '\013' -> true
     | _ -> false
   in

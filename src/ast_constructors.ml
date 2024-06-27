@@ -195,10 +195,10 @@ module Impl : Intf = struct
   let p ?(attrs = []) inlines = Paragraph (attrs, concat inlines)
 
   let ul ?(attrs = []) ?(spacing = Loose) items =
-    List (attrs, Bullet '-', spacing, items)
+    List (attrs, Bullet "-", spacing, items)
 
   let ol ?(attrs = []) ?(start = 1) ?(char = `Dot) ?(spacing = Loose) items =
-    let c = match char with `Dot -> '.' | `Paren -> ')' in
+    let c = match char with `Dot -> "." | `Paren -> ")" in
     List (attrs, Ordered (start, c), spacing, items)
 
   let blockquote ?(attrs = []) blocks = Blockquote (attrs, blocks)

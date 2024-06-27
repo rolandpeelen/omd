@@ -67,7 +67,7 @@ let needs_quotes s =
   let rec loop i =
     if i >= String.length s then false
     else
-      match s.[i] with
+      match String.to_char s.[i] with
       | ' ' | '\t' | '\x00' .. '\x1F' | '\x7F' .. '\x9F' -> true
       | _ -> loop (succ i)
   in

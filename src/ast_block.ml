@@ -12,8 +12,8 @@ end
 
 module List_types = struct
   type list_type =
-    | Ordered of int * char
-    | Bullet of char
+    | Ordered of int * string
+    | Bullet of string
 
   type list_spacing =
     | Loose
