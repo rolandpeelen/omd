@@ -15,16 +15,16 @@ init: ## Create opam switch
 	eval $(opam env)
 	opam install dune
 
-build: ## build
-	$(DUNE) build @gen --auto-promote
+build: install ## build
+	$(DUNE) build
 
 .PHONY: watch
 watch: ## build in watch mode
-	$(DUNE) build @gen --auto-promote -w
+	$(DUNE) build -w
 
 .PHONY: install
 install: ## Install opam development dependencies
-	opam install -y . --deps-only --with-test
+	opam install . --deps-only --with-test --yes
 
 .PHONY: test
 test: ## Run tests
@@ -32,6 +32,6 @@ test: ## Run tests
 	$(DUNE) runtest
 
 .PHONY: format
-fmt: ## Run tests
+fmt: ## Run format
 	$(DUNE) build @fmt --auto-promote
 # end

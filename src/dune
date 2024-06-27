@@ -1,15 +1,6 @@
 (library
  (name omd)
  (public_name omd)
- (libraries uutf uucp uunf)
-
  (preprocess
   (pps melange.ppx))
  (modes melange))
-
-(rule
- (with-stdout-to
-  entities.ml
-  (chdir
-   ../tools
-   (run ./gen_entities.exe %{dep:../tools/entities.json}))))

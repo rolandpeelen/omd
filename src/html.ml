@@ -88,24 +88,24 @@ let escape_uri s =
 let trim_start_while p s =
   let start = ref true in
   let b = Buffer.create (String.length s) in
-  Uutf.String.fold_utf_8
-    (fun () _ -> function
-      | `Malformed _ -> Buffer.add_string b s
-      | `Uchar u when p u && !start -> ()
-      | `Uchar u when !start ->
-          start := false;
-          Uutf.Buffer.add_utf_8 b u
-      | `Uchar u -> Uutf.Buffer.add_utf_8 b u)
-    ()
-    s;
+  s
+  |> String_ext.reduce
+       (fun _ s ->
+         match s with
+         | u when p u && !start -> ()
+         | u when !start ->
+             start := false;
+             Buffer.add_string b u
+         | u -> Buffer.add_string b u)
+       ();
   Buffer.contents b
 
-let underscore = Uchar.of_char '_'
-let hyphen = Uchar.of_char '-'
-let period = Uchar.of_char '.'
-let is_white_space = Uucp.White.is_white_space
-let is_alphabetic = Uucp.Alpha.is_alphabetic
-let is_hex_digit = Uucp.Num.is_hex_digit
+let underscore = "_"
+let hyphen = "-"
+let period = "."
+let is_white_space s = Js.String.trim s |> String.length == 0
+let is_alphabetic str = Js.Re.fromString "/^[a-zA-Z]*$/" |> Js.Re.test ~str
+let is_hex_digit str = Js.Re.fromString "/[0-9a-fA-F]+/" |> Js.Re.test ~str
 
 module Identifiers : sig
   type t
@@ -132,29 +132,26 @@ end
 (* Based on pandoc algorithm to derive id's.
    See: https://pandoc.org/MANUAL.html#extension-auto_identifiers *)
 let slugify s =
-  let s = trim_start_while (fun c -> not (is_alphabetic c)) s in
+  let s = trim_start_while (fun s' -> not (is_alphabetic s')) s in
   let length = String.length s in
   let b = Buffer.create length in
   let last_is_ws = ref false in
   let add_to_buffer u =
     if !last_is_ws = true then begin
-      Uutf.Buffer.add_utf_8 b (Uchar.of_char '-');
+      Buffer.add_string b "-";
       last_is_ws := false
     end;
-    Uutf.Buffer.add_utf_8 b u
+    Buffer.add_string b u
   in
-  let fold () _ = function
-    | `Malformed _ -> add_to_buffer Uutf.u_rep
-    | `Uchar u when is_white_space u && not !last_is_ws -> last_is_ws := true
-    | `Uchar u when is_white_space u && !last_is_ws -> ()
-    | `Uchar u ->
-        (if is_alphabetic u || is_hex_digit u then
-         match Uucp.Case.Map.to_lower u with
-         | `Self -> add_to_buffer u
-         | `Uchars us -> List.iter add_to_buffer us);
+  let fold () = function
+    | u when is_white_space u && not !last_is_ws -> last_is_ws := true
+    | u when is_white_space u && !last_is_ws -> ()
+    | u ->
+        if is_alphabetic u || is_hex_digit u then
+          u |> Js.String.toLowerCase |> add_to_buffer;
         if u = underscore || u = hyphen || u = period then add_to_buffer u
   in
-  Uutf.String.fold_utf_8 fold () s;
+  String_ext.reduce fold () s;
   Buffer.contents b
 
 let to_plain_text t =

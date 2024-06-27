@@ -24,14 +24,14 @@
    %{dep:attributes.md}
    %{dep:def_list.md})))
 
-(include dune.inc)
+; (include dune.inc)
 
-(executable
- (name omd)
- (libraries str omd)
- (modules omd))
-
-(rule
- (alias gen)
- (action
-  (diff dune.inc dune.inc.new)))
+; (executable
+;  (name omd)
+;  (libraries str omd)
+;  (modules omd))
+;
+; (rule
+;  (alias gen)
+;  (action
+;   (diff dune.inc dune.inc.new)))

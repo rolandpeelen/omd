@@ -1,7 +1,7 @@
 (lang dune 3.8)
 (name omd)
 (using melange 0.1)
-(version 2.0.0~alpha1)
+(version 2.0.0~melange)
 
 (cram enable)
 
@@ -30,8 +30,6 @@ package installs both the OMD library and the command line tool `omd`.")
   (dune (>= 3.14))
   (ocaml (>= 5.1))
   (melange (>= 3.0.0))
-   uutf
-   uucp
-   uunf
   (dune-build-info (>= 3.14))
+  (ocamlformat :with-dev)
   (ppx_expect :with-test)))

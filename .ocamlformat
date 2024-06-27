@@ -1,4 +1,4 @@
-version = 0.21.0
+version = 0.26.2
 exp-grouping = preserve
 break-fun-sig = fit-or-vertical
 break-fun-decl = fit-or-vertical

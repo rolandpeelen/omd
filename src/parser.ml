@@ -1,5 +1,7 @@
 open Ast.Impl
 
+let ( >> ) f g x = g (f x)
+
 type 'attr link_def =
   { label : string
   ; destination : string
@@ -468,7 +470,7 @@ let info_string c s =
         let s = StrSlice.tail s in
         match entity s with
         | ul, s ->
-            List.iter (Uutf.Buffer.add_utf_8 buf) ul;
+            List.iter (fun s -> s |> Uchar.to_char |> Buffer.add_char buf) ul;
             loop s
         | exception Fail ->
             Buffer.add_char buf c;
@@ -850,7 +852,7 @@ let inline_attribute_string s =
 let entity buf st =
   junk st;
   match on_sub entity st with
-  | cs -> List.iter (Uutf.Buffer.add_utf_8 buf) cs
+  | cs -> List.iter (fun s -> s |> Uchar.to_char |> Buffer.add_char buf) cs
   | exception Fail -> Buffer.add_char buf '&'
 
 module Pre = struct
@@ -1096,53 +1098,11 @@ type add_uchar_result =
   }
 
 (* based on https://erratique.ch/software/uucp/doc/Uucp/Case/index.html#caselesseq *)
-let normalize s =
-  let canonical_caseless_key s =
-    let b = Buffer.create (String.length s * 2) in
-    let to_nfd_and_utf_8 =
-      let n = Uunf.create `NFD in
-      let rec add v =
-        match Uunf.add n v with
-        | `Await | `End -> ()
-        | `Uchar u ->
-            Uutf.Buffer.add_utf_8 b u;
-            add `Await
-      in
-      add
-    in
-    let add_nfd =
-      let n = Uunf.create `NFD in
-      let rec add v =
-        match Uunf.add n v with
-        | `Await | `End -> ()
-        | `Uchar u ->
-            (match Uucp.Case.Fold.fold u with
-            | `Self -> to_nfd_and_utf_8 (`Uchar u)
-            | `Uchars us -> List.iter (fun u -> to_nfd_and_utf_8 (`Uchar u)) us);
-            add `Await
-      in
-      add
-    in
-    let uspace = `Uchar (Uchar.of_char ' ') in
-    let add_uchar { start; seen_ws } _ = function
-      | `Malformed _ ->
-          add_nfd (`Uchar Uutf.u_rep);
-          { start = false; seen_ws = false }
-      | `Uchar u as uchar ->
-          if Uucp.White.is_white_space u then { start; seen_ws = true }
-          else (
-            if (not start) && seen_ws then add_nfd uspace;
-            add_nfd uchar;
-            { start = false; seen_ws = false })
-    in
-    let (_ : add_uchar_result) =
-      Uutf.String.fold_utf_8 add_uchar { start = true; seen_ws = false } s
-    in
-    add_nfd `End;
-    to_nfd_and_utf_8 `End;
-    Buffer.contents b
-  in
-  canonical_caseless_key s
+let normalize =
+  Js.String.toLowerCase
+  >> Js.String.normalize
+  >> Js.String.replaceByRe ~regexp:(Js.Re.fromString "\\s+") ~replacement:" "
+  >> Js.String.trim
 
 let tag_name st =
   match peek_exn st with
@@ -1264,9 +1224,7 @@ let open_tag st =
   list attribute st;
   ws st;
   begin
-    match peek_exn st with
-    | '/' -> junk st
-    | _ -> ()
+    match peek_exn st with '/' -> junk st | _ -> ()
   end;
   if next st <> '>' then raise Fail;
   range st start (pos st - start)
@@ -1678,7 +1636,7 @@ let rec inline defs st =
     match protect (link_label true) st with
     | lab -> (
         let reflink lab =
-          let s = normalize lab in
+          let s = lab in
           match
             List.find_opt
               (fun ({ label; _ } : attributes link_def) -> label = s)
@@ -1819,7 +1777,7 @@ let rec inline defs st =
                   let off1 = pos st in
                   match link_label false st with
                   | lab -> (
-                      let s = normalize lab in
+                      let s = lab in
                       match
                         List.find_opt
                           (fun ({ label; _ } : attributes link_def) ->
